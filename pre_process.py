@@ -11,11 +11,44 @@ from helper.utils import check_dir
 import shutil
 import audioread
 
+def dct(n_filters, n_input):
+    """Discrete cosine transform (DCT type-III) basis.
+
+    .. [1] http://en.wikipedia.org/wiki/Discrete_cosine_transform
+
+    Parameters
+    ----------
+    n_filters : int > 0 [scalar]
+        number of output components (DCT filters)
+
+    n_input : int > 0 [scalar]
+        number of input components (frequency bins)
+
+    Returns
+    -------
+    dct_basis: np.ndarray [shape=(n_filters, n_input)]
+        DCT (type-III) basis vectors [1]_
+
+    Notes
+    -----
+    This function caches at level 10.
+    """
+
+    basis = np.empty((n_filters, n_input))
+    basis[0, :] = 1.0 / np.sqrt(n_input)
+
+    samples = np.arange(1, 2*n_input, 2) * np.pi / (2.0 * n_input)
+
+    for i in range(1, n_filters):
+        basis[i, :] = np.cos(i*samples) * np.sqrt(2.0/n_input)
+
+    return basis
+
 class AudioPreprocessor():
     def __init__(self, sr=16000, n_dct_filters=40, n_mel_filters=40, f_max=4000, f_min=20, n_fft_ms=30, hop_ms=10):
         super().__init__()
         self.n_mel_filters = n_mel_filters
-        self.dct_filters = librosa.filters.dct(n_dct_filters, n_mel_filters)
+        self.dct_filters = dct(n_dct_filters, n_mel_filters)
         self.sr = sr
         self.f_max = f_max if f_max is not None else sr // 2
         self.f_min = f_min

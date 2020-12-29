@@ -4,109 +4,82 @@ import torch.nn.functional as F
 import torch.nn as nn
 import math
 
+def flip(x, dim):
+    xsize = x.size()
+    dim = x.dim() + dim if dim < 0 else dim
+    x = x.contiguous()
+    x = x.view(-1, *xsize[dim:])
+    x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1)-1,
+                      -1, -1), ('cpu','cuda')[x.is_cuda])().long(), :]
+    return x.view(xsize)
+
 def sinc(band, t_right):
-    """
-    :param band: (n_filt)
-    :param t_right: K = filt_dim // 2 - 1
-    :return: (n_filt, filt_dim)
-    """
-    n_filt = band.size(0)
-    band = band[:, None]  # (n_filt, 1)
-    t_right = t_right[None, :]  # (1, K)
-    y_right = torch.sin(2 * math.pi * band * t_right) / (2 * math.pi * band * t_right)  # (n_filt, K)
-    y_left = torch.flip(y_right, [1])
-    y = torch.cat([y_left, torch.ones([n_filt, 1], device=band.device), y_right], dim=1)  # (n_filt, filt_dim)
+    y_right = torch.sin(2 * math.pi * band * t_right) / (2 * math.pi * band * t_right)
+    y_left = flip(y_right,0)
+    y = torch.cat([y_left, torch.autograd.Variable(torch.ones(1)).cuda(),y_right])
     return y
 
+class sinc_conv(nn.Module):
 
-def get_mel_points(fs, n_filt, fmin=80):
-    """
-    Return `n_filt` points linearly spaced in the mel-scale (in Hz)
-    with an upper frequency of fs / 2
-    :param fs: the sample rate in Hz
-    :return: np.array (n_filt)
-    """
-    high_freq_mel = (2595 * np.log10(1 + (fs / 2) / 700))
-    mel_points = np.linspace(fmin, high_freq_mel, n_filt)  # equally spaced in mel scale
-    f_cos = (700 * (10 ** (mel_points / 2595) - 1))
-    return f_cos
+    def __init__(self, N_filt, Filt_dim, fs):
+        super(sinc_conv, self).__init__()
 
+        # Mel Initialization of the filterbanks
+        low_freq_mel = 80
+        high_freq_mel = (2595 * np.log10(1 + (fs / 2) / 700))  # Convert Hz to Mel
+        mel_points = np.linspace(low_freq_mel, high_freq_mel, N_filt)  # Equally spaced in Mel scale
+        f_cos = (700 * (10 ** (mel_points / 2595) - 1))  # Convert Mel to Hz
+        b1 = np.roll(f_cos, 1)
+        b2 = np.roll(f_cos, -1)
+        b1[0] = 30
+        b2[-1] = (fs / 2) - 100
 
-def get_bands(f_cos, fs):
-    """
-    :param f_cos: vector of mel-scaled frequency (n_filt)
-    :param fs: audio sample rate
-    :return (b1, b1)
-        b1: vector of lower cutoffs (n_filt)
-        b2: vector of upper cutoffs
-    """
-    b1 = np.roll(f_cos, 1)
-    b2 = np.roll(f_cos, -1)
-    b1[0] = 30
-    b2[-1] = (fs / 2) - 100
-    return b1, b2
+        self.freq_scale = fs * 1.0
+        self.filt_b1 = nn.Parameter(torch.from_numpy(b1 / self.freq_scale))
+        self.filt_band = nn.Parameter(torch.from_numpy((b2 - b1) / self.freq_scale))
 
-
-class SincConv(nn.Module):
-    def __init__(self, n_filt, filt_dim, fs):
-        """
-        :param n_filt: number of filters
-        :param filt_dim: filter width
-        :param fs: audio sample rate in Hz
-        """
-        super(SincConv, self).__init__()
-        self.n_filt = n_filt
-        self.filt_dim = filt_dim
+        self.N_filt = N_filt
+        self.Filt_dim = Filt_dim
         self.fs = fs
-
-        # set minimum cutoff and bandwidth
-        self.min_freq = 50.0
-        self.min_band = 50.0
-
-        # calculate the band params
-        f_cos = get_mel_points(fs, n_filt)
-        b1, b2 = get_bands(f_cos, fs)
-
-        # learnable params
-        filt_b1 = torch.from_numpy(b1 / self.fs).float()
-        filt_band = torch.from_numpy((b2 - b1) / self.fs).float()
-        self.filt_b1 = nn.Parameter(filt_b1)
-        self.filt_band = nn.Parameter(filt_band)
-
-        # define the window function
-        hamming_window = torch.from_numpy(np.hamming(filt_dim)).float()
-        self.register_buffer('hamming_window', hamming_window)
-
-        # define the linspace for the sinc function here
-        t_right = torch.linspace(1, (filt_dim - 1) / 2, steps=int((filt_dim - 1) / 2)) / fs
-        self.register_buffer('t_right', t_right.float())
 
     def forward(self, x):
         """
-        :param x: (batch, 1, length)
-        :return: (batch, n_filt, length)
+        :param x: [batch_size, 1, wav_length]
+        :return:  [batch_size, self.N_filt, wav_length - self.Filt_dim]
         """
+        filters = torch.autograd.Variable(torch.zeros((self.N_filt, self.Filt_dim))).cuda()
+        N = self.Filt_dim
+        t_right = torch.autograd.Variable(torch.linspace(1, (N - 1) / 2, steps=int((N - 1) / 2)) / self.fs).cuda()
 
-        # convert bandwidth to upper cutoff and enforce they are >= min values
-        filt_beg_freq = torch.abs(self.filt_b1) + self.min_freq / self.fs
-        filt_end_freq = filt_beg_freq + (torch.abs(self.filt_band) + self.min_band / self.fs)
+        min_freq = 50.0
+        min_band = 50.0
 
-        # construct the filter bank
-        low_pass1 = 2 * filt_beg_freq[:, None] * sinc(filt_beg_freq * self.fs, self.t_right)
-        low_pass2 = 2 * filt_end_freq[:, None] * sinc(filt_end_freq * self.fs, self.t_right)
-        band_pass = (low_pass2 - low_pass1)
-        max_band, _ = torch.max(band_pass, dim=1, keepdim=True)
-        band_pass = band_pass / max_band  # (n_filt, filt_dim)
-        filters = band_pass * self.hamming_window[None, ]  # (n_filt, filt_dim)
+        filt_beg_freq = torch.abs(self.filt_b1) + min_freq / self.freq_scale
+        filt_end_freq = filt_beg_freq + (torch.abs(self.filt_band) + min_band / self.freq_scale)
 
-        # apply padding to preserve length dimension and convolve
-        padding = (self.filt_dim - 1) // 2
-        out = F.conv1d(x, filters.view(self.n_filt, 1, self.filt_dim), padding=padding)
+        n = torch.linspace(0, N, steps=N)
+
+        # Filter window (hamming)
+        window = 0.54 - 0.46 * torch.cos(2 * math.pi * n / N)
+        window = torch.autograd.Variable(window.float().cuda())
+
+        for i in range(self.N_filt):
+            low_pass1 = 2 * filt_beg_freq[i].float() * sinc(filt_beg_freq[i].float() * self.freq_scale, t_right)
+            low_pass2 = 2 * filt_end_freq[i].float() * sinc(filt_end_freq[i].float() * self.freq_scale, t_right)
+            band_pass = (low_pass2 - low_pass1)
+
+            band_pass = band_pass / torch.max(band_pass)
+
+            filters[i, :] = band_pass.cuda() * window
+
+        out = F.conv1d(x, filters.view(self.N_filt, 1, self.Filt_dim))
 
         return out
 
 if __name__ == '__main__':
-    model = SincConv(n_filt=40, filt_dim=400, fs=16000)
-    x = torch.Tensor(64, 1, 16000)
+    model = sinc_conv(80, 251, 16000).cuda()
+    x = torch.Tensor(64, 1, 3200).cuda()
     y = model(x)
+    # x = get_mel_points(16000, 80)
+    # y = get_bands(x, 16000)
     pass

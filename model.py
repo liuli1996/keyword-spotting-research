@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model_modules import AMSoftmax, DS_Convolution, MLP, Highway
+from model_modules import AMSoftmax, DS_Convolution, MLP, Highway, SincConv, LogCompression
 from torchsummary import summary
 import torch
 import random
@@ -411,6 +411,20 @@ class E2E_ASR_FREE(SerializableModule):
         x = self.fc(torch.cat([am_embedding.squeeze(1), lm_embedding], dim=1))
         y = self.output(x)
         return y, x
+
+class SincNet(SerializableModule):
+    def __init__(self):
+        super(SincNet, self).__init__()
+        self.sinc_block = nn.Sequential(
+            SincConv(N_filt=40, Filt_dim=101, fs=16000),
+            LogCompression(),
+            nn.BatchNorm2d(40),
+            nn.AvgPool2d(2)
+        )
+
+    def forward(self, x):
+        y = self.sinc_conv(x)
+        return y
 
 if __name__ == '__main__':
     model = E2E_ASR_FREE().cuda()

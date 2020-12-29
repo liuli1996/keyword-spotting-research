@@ -50,7 +50,7 @@ def write_TIMIT_test_csv(feature_dir, output_file):
         for file in npy_list:
             csv_writer.writerow([file, "unknown"])
 
-    df = pd.read_csv("../csv_win/user_defined_keywords_for_testing.csv")
+    df = pd.read_csv("../csv_win/user_defined_keywords_for_testing_fbank.csv")
     df = df[(True ^ df['label'].isin(['unknown']))]
     df_TIMIT = pd.read_csv(output_file)
     df_total = pd.concat([df, df_TIMIT], axis=0).reset_index(drop=True)
@@ -101,4 +101,4 @@ if __name__ == '__main__':
     # pool.close()
     # pool.join()
 
-    write_TIMIT_test_csv("D:/dataset/features/TIMIT/win30ms_hop10ms_13mfcc_clean/n_test", "../csv_win/TIMIT_test_e2e.csv")
+    write_TIMIT_test_csv("D:/dataset/features/TIMIT/win30ms_hop10ms_40fbank_clean/n_test", "../csv_win/TIMIT_test_fbank.csv")

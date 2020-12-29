@@ -153,19 +153,19 @@ if __name__ == '__main__':
     # revise_csv_file("./csv_linux/enroll.csv", "./csv_win/enroll_mfcc.csv")
 
     model_file = {
-        # "res15": "./models_pt/res15/model_32000.pt",
-        # "res15_fulllabel_finetune13layer_customized_only": "./models_pt/res15_fulllabel_finetune13layer_customized_only/model_10.pt",
-        # "tradfpool3": "./models_pt/tradfpool3/model_32000.pt",
-        # "tradfpool3_fulllabel_finetune4layer_customized_only": "./models_pt/tradfpool3_fulllabel_finetune4layer_customized_only/model_10.pt",
-        # "lstm": "./models_pt/lstm/model_32000.pt",
-        # "AmResNet": "./models_pt/AmResNet/model_24.pt",
+        "res15": "./models_pt/res15/model_32000.pt",
+        "res15_fulllabel_finetune13layer_customized_only": "./models_pt/res15_fulllabel_finetune13layer_customized_only/model_10.pt",
+        "tradfpool3": "./models_pt/tradfpool3/model_32000.pt",
+        "tradfpool3_fulllabel_finetune4layer_customized_only": "./models_pt/tradfpool3_fulllabel_finetune4layer_customized_only/model_10.pt",
+        "AmResNet": "./models_pt/AmResNet/model_24.pt",
+        "lstm": "./models_pt/lstm/model_32000.pt",
         # "dscnn": "./models_pt/DSCNN/model_best.pt",
-        "tdnn": "./models_pt/TDNN/model_best.pt",
+        # "tdnn": "./models_pt/TDNN/model_best.pt",
     }
 
     enrollment_file = "./csv_win/user_defined_keywords_for_enrollment.csv"
-    testing_file = "./csv_win/user_defined_keywords_for_testing.csv"
-    # testing_file = "./csv_win/TIMIT_test.csv"
+    # testing_file = "./csv_win/user_defined_keywords_for_testing.csv"
+    testing_file = "./csv_win/TIMIT_test.csv"
 
     # enrollment_file = "./csv_win/enroll_mfcc.csv"
     # testing_file = "./csv_win/test_mfcc.csv"
@@ -206,10 +206,10 @@ if __name__ == '__main__':
             raise ValueError("No suitable model file")
 
         test_processor = TestProcessor(model, model_type=model_name)
-        test_processor.compute_embedding_accuracy(enrollment_file, testing_file)
-        # test_processor.compute_embedding_accuracy(enrollment_file, testing_file, threshold=0.7)
-        # scores, labels = test_processor.compute_roc_data(enrollment_file, testing_file)
-        # # np.save("./roc_data/TIMIT_" + model_name + "_scores.npy", scores)
-        # # np.save("./roc_data/TIMIT_" + model_name + "_labels.npy", labels)
+        # test_processor.compute_embedding_accuracy(enrollment_file, testing_file)
+        # test_processor.compute_embedding_accuracy(enrollment_file, testing_file, threshold=0)
+        scores, labels = test_processor.compute_roc_data(enrollment_file, testing_file)
+        np.save("./roc_data/TIMIT2_" + model_name + "_scores.npy", scores)
+        np.save("./roc_data/TIMIT2_" + model_name + "_labels.npy", labels)
         # np.save("./roc_data/" + model_name + "_scores.npy", scores)
         # np.save("./roc_data/" + model_name + "_labels.npy", labels)

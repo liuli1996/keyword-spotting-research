@@ -32,7 +32,7 @@ if __name__ == '__main__':
     fpr_4, fnr_4 = compute_fpr_fnr("res15")
     fpr_5, fnr_5 = compute_fpr_fnr("lstm")
     fpr_6, fnr_6 = compute_fpr_fnr("AmResNet")
-    fpr_7, fnr_7 = compute_fpr_fnr("e2e_asr_free")
+    # fpr_7, fnr_7 = compute_fpr_fnr("e2e_asr_free")
 
     font = {'size': 16}
 
@@ -45,12 +45,17 @@ if __name__ == '__main__':
     plt.plot(fpr_3, fnr_3, color='red', lw=lw, ls='--', label="cnn-trad-fpool3")
     plt.plot(fpr_5, fnr_5, color='darkorange', lw=lw, label="LSTM")
     plt.plot(fpr_6, fnr_6, color='darkgreen', lw=lw, label="AC-ResNet")
-    plt.plot(fpr_7, fnr_7, color='darkviolet', lw=lw, label="E2E_ASR_free")
+    # plt.plot(fpr_7, fnr_7, color='darkviolet', lw=lw, label="E2E_ASR_free")
 
     plt.legend()
+    frame = plt.legend().get_frame()
+    frame.set_alpha(1)
+    frame.set_facecolor('none')  # 设置图例legend背景透明
+
     plt.xlim([0.0, 0.20])
     plt.ylim([0.0, 1.0])
     plt.xlabel('False Alarm Rate')
     plt.ylabel('False Rejects Rate')
     plt.title('ROC')
     plt.show()
+    # plt.savefig('./test1.png', transparent=True)

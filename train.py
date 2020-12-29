@@ -23,7 +23,7 @@ def configuration():
     config['epoch'] = 90
     config['batch_size'] = 100
 
-    config['train_csv'] = './csv_win/train_mfcc.csv'
+    config['train_csv'] = './csv_linux/train_fulllabel.csv'
     config['val_csv'] = './csv_win/test_mfcc.csv'
 
     df = pd.read_csv(config['train_csv'])
