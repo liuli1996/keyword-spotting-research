@@ -73,7 +73,11 @@ class Res15(SerializableModule):
         self.output = nn.Linear(n_maps, n_labels)
 
     def forward(self, x):
-        x = x.unsqueeze(0)
+        """
+        :param x: shape of [N, 101, 40]
+        :return:
+        """
+        x = x.unsqueeze(1)
         for i in range(self.n_layers + 1):
             y = F.relu(getattr(self, "conv{}".format(i))(x))
 

@@ -7,10 +7,12 @@ import collections
 import time
 import pyaudio
 import numpy as np
+import queue
 import torch.nn.functional as F
-
+import matplotlib.animation as animation
+import matplotlib.lines as line
 import matplotlib
-# matplotlib.use('Agg')  # 该模式下绘图无法显示，plt.show()也无法作用
+matplotlib.use('Agg')  # 该模式下绘图无法显示，plt.show()也无法作用
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationToolbar2Tk)
 
@@ -59,25 +61,34 @@ class RingBuffer():
         # self._buf.clear()
         return tmp
 
+    def empty(self):
+        if len(self._buf) == 0:
+            return True
+        else:
+            return False
+
+    def size(self):
+        return len(self._buf)
+
 class HotwordDetector():
     def __init__(self):
         self.ring_buffer = RingBuffer(32000)
+        self.q = queue.Queue()
         self.prob_buffer = collections.deque(maxlen=3)
         self.detector = Detector()
         self.label = "---"
-        self.is_customized = False
+        self.customized = False
         self.user_defined_keyword_embedding = torch.load("personalized_keyword.pt")
-        self.audio_data = np.zeros(16000)
-        self.threshold = 0.7
-
-    def _start(self, sleep_time=0.1):
+        self.ad_rdy_ev = threading.Event()
         self._running = True
 
-        def audio_callback(in_data, frame_count, time_info, status):
-            self.ring_buffer.extend(in_data)
-            play_data = chr(0) * len(in_data)
-            return play_data, pyaudio.paContinue
+    def audio_callback(self, in_data, frame_count, time_info, status):
+        self.ring_buffer.extend(in_data)
+        self.q.put(in_data)
+        self.ad_rdy_ev.set()
+        return (None, pyaudio.paContinue)
 
+    def _start(self):
         self.p = pyaudio.PyAudio()
         self.stream = self.p.open(
             input=True,
@@ -86,44 +97,46 @@ class HotwordDetector():
             format=pyaudio.paInt16,
             rate=16000,
             frames_per_buffer=1024,
-            stream_callback=audio_callback)
+            stream_callback=self.audio_callback)
 
         self.stream.start_stream()
         print("detecting...")
 
+    def _quit(self):
+        self._running = False
+        self.stream.stop_stream()
+        self.stream.close()
+        self.p.terminate()
+
+    def detecting(self, sleep_time=0.1):
         while self._running is True:
-
             raw_data = self.ring_buffer.get()
-            self.audio_data = buf_to_float(raw_data)
+            audio_data = buf_to_float(raw_data)
 
-            if len(self.audio_data) == 16000:
-                prob, embedding, _ = self.detector.calculate_probability(self.audio_data)
+            if len(audio_data) == 16000:
+                prob, embedding, _ = self.detector.calculate_probability(audio_data)
                 self.prob_buffer.extend(prob.detach().numpy())
                 prob_window = np.vstack(self.prob_buffer)
                 average_prob = np.mean(prob_window, axis=0)
                 max_index = np.argmax(average_prob, axis=-1)
                 label = self.detector.labels[int(max_index)]
+
                 # 控制是否启用自定义唤醒词
-                if self.is_customized:
+                if self.customized:
                     probability = F.cosine_similarity(self.user_defined_keyword_embedding, embedding).item()
                     label = "active"
                 else:
                     probability = average_prob[int(max_index)]
 
-                if probability > self.threshold:
+                if probability > 0.7:
                     self.label = label
                 else:
                     self.label = 'silence'
-                # print(prob)
+                print(prob)
 
-            if len(self.audio_data) == 0:
+            if len(audio_data) == 0:
                 time.sleep(sleep_time)
                 continue
-
-    def _quit(self):
-        self.stream.stop_stream()
-        self.stream.close()
-        self.p.terminate()
 
 def thread_it(func, *args):
     t = threading.Thread(target=func, args=args)
@@ -131,6 +144,7 @@ def thread_it(func, *args):
     t.start()
 
 def _quit():
+    processor._quit()
     window.quit()     # stops mainloop
     window.destroy()  # this is necessary on Windows to prevent Fatal Python Error: PyEval_RestoreThread: NULL tstate
 
@@ -138,30 +152,81 @@ def result_update():
     var.set(processor.label)
     window.after(100, func=result_update)
 
+def read_audio(processor):
+    global rt_data
+
+    while processor.stream.is_active():
+        processor.ad_rdy_ev.wait(timeout=1000)
+        if not processor.q.empty():
+            # process audio data here
+            data = processor.q.get()
+            while not processor.q.empty():
+                processor.q.get()
+            rt_data = np.frombuffer(data, np.dtype('<i2'))
+            print(rt_data)
+        processor.ad_rdy_ev.clear()
 
 if __name__ == "__main__":
-    processor = HotwordDetector()
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+    global rt_data
 
     # GUI
     window = tk.Tk()
     window.title('keyword spotting')
-    window.geometry('300x200')
+    window.geometry('500x400')
+    window.configure(bg="white")
+
+    # quit_button = tk.Button(window, text="quit", command=_quit)
+    # quit_button.pack(side=tk.BOTTOM)
 
     var = tk.StringVar()
-    text = tk.Label(window, textvariable=var, font=('Consolas', 48))
-    text.pack(expand="yes")
+    text = tk.Label(window, textvariable=var, font=('Consolas', 24), bg="white")
+    text.pack(side=tk.BOTTOM, expand=tk.YES, pady=30)
 
-    quit_button = tk.Button(window, text="quit", command=_quit)
-    quit_button.pack()
+    processor = HotwordDetector()
+    processor._start()
 
-    # canvas = FigureCanvasTkAgg(fig, master=window)  # A tk.DrawingArea.
-    # canvas.draw()
-    # canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+    # Matplotlib
+    fig = plt.figure()
 
-    thread_it(func=processor._start)
+    canvas = FigureCanvasTkAgg(fig, master=window)  # A tk.DrawingArea.
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=tk.YES)
 
+
+    CHUNK = 1024
+    rt_ax = plt.subplot(111, xlim=(0, CHUNK), ylim=(-32768, 32768))
+    # rt_ax.set_title("Real Time")
+    rt_ax.xaxis.set_visible(False)
+    rt_ax.yaxis.set_visible(False)
+    # rt_ax.spines['top'].set_visible(False)
+    # rt_ax.spines['right'].set_visible(False)
+    # rt_ax.spines['bottom'].set_visible(False)
+    # rt_ax.spines['left'].set_visible(False)
+
+    rt_line = line.Line2D([], [])
+
+    rt_x_data = np.arange(0, CHUNK, 1)
+
+    def plot_init():
+        rt_ax.add_line(rt_line)
+        return rt_line,
+
+    def plot_update(i):
+        global rt_data
+        rt_line.set_xdata(rt_x_data)
+        rt_line.set_ydata(rt_data)
+
+        return rt_line,
+
+
+    ani = animation.FuncAnimation(fig, plot_update,
+                                  init_func=plot_init,
+                                  frames=1,
+                                  interval=100,
+                                  blit=True)
+
+    thread_it(read_audio, processor)
+    thread_it(processor.detecting)
 
     window.after(100, func=result_update)
     window.mainloop()

@@ -1,0 +1,21 @@
+# temporary files
+temp/
+query_by_example/
+data_augment/
+fine-tune/
+*.log
+untitled.py
+
+# saved data files
+cmvn_stats/
+csv/
+csv_linux/
+csv_win/
+models_pt/
+models_fine_grained_pt/
+roc_data/
+demo/*.wav
+
+# pycharm
+idea/
+__pycache__/

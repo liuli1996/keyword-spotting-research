@@ -1,5 +1,19 @@
 import numpy as np
 import librosa
+import audioread
+
+def load_audio(file_name, in_len=16000):
+    try:
+        data = librosa.load(file_name, sr=16000)[0]
+    except audioread.exceptions.NoBackendError:
+        print("There exists problem of the file {}". format(file_name), end="")
+        raise
+
+    if len(data) <= in_len:
+        data = np.pad(data, (0, in_len - len(data)), "constant")  # data padding
+    else:
+        data = data[:in_len]  # data truncating
+    return data
 
 def dct(n_filters, n_input):
     """Discrete cosine transform (DCT type-III) basis.
